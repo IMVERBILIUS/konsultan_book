@@ -7,24 +7,35 @@ use Illuminate\Http\Request;
 use App\Models\Article;
 use App\Models\Subheading;
 use App\Models\Paragraph;
-use App\Models\User;
-use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\ValidationException;
+use App\Models\User; // Pastikan model User diimpor
+use Illuminate\Support\Str; // Untuk fungsi Str::slug() dan Str::random()
+use Illuminate\Support\Facades\Storage; // Untuk Storage::disk('public')
+use Illuminate\Support\Facades\DB; // Untuk transaksi database
+use Illuminate\Validation\ValidationException; // Untuk menangani error validasi
+use Illuminate\Support\Facades\Log; // Impor Log facade
 
 class ArticleController extends Controller
 {
     /**
      * Tampilkan semua artikel (untuk daftar admin).
+     * Mengembalikan data paginasi standar Laravel.
      *
      * @param  \Illuminate\Http\Request  $request
      * @return \Illuminate\Http\JsonResponse
      */
     public function index(Request $request)
     {
-        $articles = Article::orderBy('created_at', 'desc')->paginate(10);
-        return response()->json($articles);
+        try {
+            $articles = Article::orderBy('created_at', 'desc')->paginate(10); // Pastikan ini menggunakan paginate()
+
+            // Log debug untuk melihat format respons
+            Log::info('DEBUG LARAVEL CONTROLLER [ARTICLE INDEX]: Pagination data sent: ' . json_encode($articles->toArray()));
+
+            return response()->json($articles); // Langsung kembalikan objek paginator
+        } catch (\Exception $e) {
+            Log::error('Error fetching articles for admin list: ' . $e->getMessage() . ' Trace: ' . $e->getTraceAsString());
+            return response()->json(['message' => 'Failed to fetch articles list.'], 500);
+        }
     }
 
     /**
@@ -36,18 +47,25 @@ class ArticleController extends Controller
     public function store(Request $request)
     {
         // --- DEBUGGING: Log isi request di awal controller lifecycle ---
-        \Log::info('DEBUG LARAVEL CONTROLLER [STORE]: Incoming request for store.');
-        \Log::info('DEBUG LARAVEL CONTROLLER [STORE]: Request all(): ' . json_encode($request->all()));
-        \Log::info('DEBUG LARAVEL CONTROLLER [STORE]: Request hasFile("article_thumbnail_file"): ' . ($request->hasFile('article_thumbnail_file') ? 'TRUE' : 'FALSE'));
+        Log::info('DEBUG LARAVEL CONTROLLER [STORE]: Incoming request for store.');
+        Log::info('DEBUG LARAVEL CONTROLLER [STORE]: Request headers: ' . json_encode($request->headers->all()));
+        Log::info('DEBUG LARAVEL CONTROLLER [STORE]: Request all() before validation: ' . json_encode($request->all()));
+        Log::info('DEBUG LARAVEL CONTROLLER [STORE]: Request has("title"): ' . ($request->has('title') ? 'TRUE' : 'FALSE') . ' Value: ' . $request->input('title'));
+        Log::info('DEBUG LARAVEL CONTROLLER [STORE]: Request has("slug"): ' . ($request->has('slug') ? 'TRUE' : 'FALSE') . ' Value: ' . $request->input('slug'));
+        Log::info('DEBUG LARAVEL CONTROLLER [STORE]: Request has("author"): ' . ($request->has('author') ? 'TRUE' : 'FALSE') . ' Value: ' . $request->input('author'));
+        Log::info('DEBUG LARAVEL CONTROLLER [STORE]: Request has("description"): ' . ($request->has('description') ? 'TRUE' : 'FALSE') . ' Value: ' . $request->input('description'));
+        Log::info('DEBUG LARAVEL CONTROLLER [STORE]: Request has("status"): ' . ($request->has('status') ? 'TRUE' : 'FALSE') . ' Value: ' . $request->input('status'));
+        Log::info('DEBUG LARAVEL CONTROLLER [STORE]: Request hasFile("article_thumbnail_file"): ' . ($request->hasFile('article_thumbnail_file') ? 'TRUE' : 'FALSE'));
         if ($request->hasFile('article_thumbnail_file')) {
             $file = $request->file('article_thumbnail_file');
-            \Log::info('DEBUG LARAVEL CONTROLLER [STORE]: File details (hasFile is TRUE): OriginalName=' . $file->getClientOriginalName() . ', MimeType=' . $file->getMimeType() . ', Size=' . $file->getSize());
+            Log::info('DEBUG LARAVEL CONTROLLER [STORE]: File details (hasFile is TRUE): OriginalName=' . $file->getClientOriginalName() . ', MimeType=' . $file->getMimeType() . ', Size=' . $file->getSize());
         } else {
-            \Log::info('DEBUG LARAVEL CONTROLLER [STORE]: Request hasFile is FALSE for article_thumbnail_file. File might not have reached PHP or name mismatch.');
+            Log::info('DEBUG LARAVEL CONTROLLER [STORE]: Request hasFile is FALSE for article_thumbnail_file. File might not have reached PHP or name mismatch.');
         }
         // --- AKHIR DEBUGGING ---
 
         try {
+            // Validasi input form
             $request->validate([
                 'title' => 'required|string|max:255',
                 'slug' => 'required|string|unique:articles,slug|max:255',
@@ -58,7 +76,7 @@ class ArticleController extends Controller
                 'subheadings' => 'nullable|json',
             ]);
         } catch (ValidationException $e) {
-            \Log::error('Validation Error (store): ' . json_encode($e->errors()));
+            Log::error('Validation Error (store): ' . json_encode($e->errors()));
             return response()->json(['errors' => $e->errors()], 422);
         }
 
@@ -277,13 +295,13 @@ class ArticleController extends Controller
                 \Log::info('DEBUG LARAVEL: Thumbnail deleted: ' . $article->thumbnail);
             }
 
-            $article->delete(); // Eloquent akan menangani cascade delete untuk subheadings dan paragraphs
+            $article->delete();
 
             DB::commit();
 
             return response()->json(['message' => 'Article deleted successfully.']);
 
-        } catch (\Exception | ValidationException $e) { // Tangani ValidationException juga
+        } catch (\Exception | ValidationException $e) {
             DB::rollBack();
             \Log::error('Error deleting article: ' . $e->getMessage() . ' Trace: ' . $e->getTraceAsString());
             return response()->json(['message' => 'Failed to delete article: ' . $e->getMessage()], 500);
@@ -316,19 +334,19 @@ class ArticleController extends Controller
     {
         $article = Article::with('subheadings.paragraphs')
                         ->where('slug', $slug)
-                        ->where('status', 'Published') // <--- PENTING: Hanya ambil yang Published
+                        ->where('status', 'Published')
                         ->first();
 
         if (!$article) {
             $checkDraft = Article::where('slug', $slug)->first();
             if($checkDraft){
-                return response()->json(['message' => 'Article is not published yet.'], 403); // <--- PENTING: Jika Draft, kembalikan 403
+                return response()->json(['message' => 'Article is not published yet.'], 403);
             }
             return response()->json(['message' => 'Article not found.'], 404);
         }
 
         try {
-            $article->increment('views'); // <--- PENTING: Increment views hanya jika artikel Published
+            $article->increment('views');
             \Log::info('DEBUG LARAVEL: Views incremented for slug: ' . $slug . '. New views: ' . ($article->views));
 
             return response()->json($article);

@@ -4,40 +4,38 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Models\Sketch; // Pastikan model Sketch diimpor
-use App\Models\User; // Pastikan model User diimpor untuk dashboard stats atau relasi user
-use Illuminate\Support\Str; // Untuk slug dan random string
-use Illuminate\Support\Facades\Storage; // Untuk upload file
-use Illuminate\Validation\ValidationException; // Untuk validasi
-use Illuminate\Support\Facades\Log; // Impor Log facade untuk logging yang lebih fleksibel
+use App\Models\Sketch;
+use App\Models\User;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\Log;
 
 class SketchController extends Controller
 {
     /**
      * Tampilkan semua sketsa (untuk daftar admin).
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
      */
     public function index(Request $request)
     {
-        $sketches = Sketch::orderBy('created_at', 'desc')->paginate(10);
-        return response()->json($sketches);
+        try {
+            $sketches = Sketch::orderBy('created_at', 'desc')->paginate(10);
+            return response()->json($sketches);
+        } catch (\Exception $e) {
+            Log::error('Error fetching sketches for admin list: ' . $e->getMessage() . ' Trace: ' . $e->getTraceAsString());
+            return response()->json(['message' => 'Failed to fetch sketches list.'], 500);
+        }
     }
 
     /**
      * Simpan sketsa baru.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
      */
     public function store(Request $request)
     {
-        // --- DEBUGGING: Log isi request di awal controller lifecycle ---
         Log::info('DEBUG LARAVEL CONTROLLER [SKETCH STORE]: Incoming request for store.');
         Log::info('DEBUG LARAVEL CONTROLLER [SKETCH STORE]: Request headers: ' . json_encode($request->headers->all()));
         Log::info('DEBUG LARAVEL CONTROLLER [SKETCH STORE]: Request all() before validation: ' . json_encode($request->all()));
-        Log::info('DEBUG LARAVEL CONTROLLER [SKETCH STORE]: Request has("title"): ' . ($request->has('title') ? 'TRUE' : 'FALSE') . ' Value: ' . $request->input('title')); // Debug value
+        Log::info('DEBUG LARAVEL CONTROLLER [SKETCH STORE]: Request has("title"): ' . ($request->has('title') ? 'TRUE' : 'FALSE') . ' Value: ' . $request->input('title'));
         Log::info('DEBUG LARAVEL CONTROLLER [SKETCH STORE]: Request has("slug"): ' . ($request->has('slug') ? 'TRUE' : 'FALSE') . ' Value: ' . $request->input('slug'));
         Log::info('DEBUG LARAVEL CONTROLLER [SKETCH STORE]: Request has("author"): ' . ($request->has('author') ? 'TRUE' : 'FALSE') . ' Value: ' . $request->input('author'));
         Log::info('DEBUG LARAVEL CONTROLLER [SKETCH STORE]: Request has("content"): ' . ($request->has('content') ? 'TRUE' : 'FALSE') . ' Value: ' . $request->input('content'));
@@ -49,15 +47,14 @@ class SketchController extends Controller
         } else {
             Log::info('DEBUG LARAVEL CONTROLLER [SKETCH STORE]: Request hasFile is FALSE for sketch_thumbnail_file. File might not have reached PHP or name mismatch.');
         }
-        // --- AKHIR DEBUGGING ---
 
         try {
             $request->validate([
                 'title' => 'required|string|max:255',
                 'slug' => 'required|string|unique:sketches,slug|max:255',
                 'author' => 'required|string|max:255',
-                'content' => 'required|string', // Konten sketsa
-                'sketch_thumbnail_file' => 'nullable|image|mimes:jpg,jpeg,png,gif|max:5120', // Max 5MB
+                'content' => 'required|string',
+                'sketch_thumbnail_file' => 'nullable|image|mimes:jpg,jpeg,png,gif|max:5120',
                 'status' => 'required|in:Draft,Published',
             ]);
         } catch (ValidationException $e) {
@@ -108,35 +105,36 @@ class SketchController extends Controller
      * @param  int  $id
      * @return \Illuminate\Http\JsonResponse
      */
-    public function show($id)
+    public function show($id) // Ini dipanggil oleh AdminSketchDetailPage dan SketchEditPage
     {
-        $sketch = Sketch::find($id);
+        // --- DEBUGGING: Log pengambilan sketsa admin ---
+        \Log::info('DEBUG LARAVEL CONTROLLER [SKETCH SHOW ADMIN]: Fetching sketch with ID: ' . $id);
+        // --- AKHIR DEBUGGING ---
+
+        // PENTING: Hanya panggil find(), jangan where('status', 'Published') di sini
+        $sketch = Sketch::find($id); // Find by ID, terlepas dari status
+
         if (!$sketch) {
-            return response()->json(['message' => 'Sketch not found.'], 404);
+            \Log::warning('DEBUG LARAVEL CONTROLLER [SKETCH SHOW ADMIN]: Sketch ID ' . $id . ' not found for admin view.');
+            return response()->json(['message' => 'Sketsa tidak ditemukan.'], 404);
         }
+
+        \Log::info('DEBUG LARAVEL CONTROLLER [SKETCH SHOW ADMIN]: Sketch ID ' . $id . ' found. Status: ' . $sketch->status);
         return response()->json($sketch);
     }
 
     /**
      * Perbarui sketsa yang sudah ada.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  int  $id
-     * @return \Illuminate\Http\JsonResponse
      */
     public function update(Request $request, $id)
     {
-        // --- DEBUGGING: Log isi request di awal controller lifecycle ---
         \Log::info('DEBUG LARAVEL CONTROLLER [SKETCH UPDATE]: Incoming update request for Sketch ID: ' . $id);
-        \Log::info('DEBUG LARAVEL CONTROLLER [SKETCH UPDATE]: Request headers: ' . json_encode($request->headers->all()));
         \Log::info('DEBUG LARAVEL CONTROLLER [SKETCH UPDATE]: Request all() before validation: ' . json_encode($request->all()));
-        \Log::info('DEBUG LARAVEL CONTROLLER [SKETCH UPDATE]: Request has("title"): ' . ($request->has('title') ? 'TRUE' : 'FALSE') . ' Value: ' . $request->input('title'));
         \Log::info('DEBUG LARAVEL CONTROLLER [SKETCH UPDATE]: Request hasFile("sketch_thumbnail_file"): ' . ($request->hasFile('sketch_thumbnail_file') ? 'TRUE' : 'FALSE'));
         if ($request->hasFile('sketch_thumbnail_file')) {
             $file = $request->file('sketch_thumbnail_file');
             \Log::info('DEBUG LARAVEL CONTROLLER [SKETCH UPDATE]: File details (hasFile is TRUE): OriginalName=' . $file->getClientOriginalName() . ', MimeType=' . $file->getMimeType() . ', Size=' . $file->getSize());
         }
-        // --- AKHIR DEBUGGING ---
 
         $sketch = Sketch::find($id);
         if (!$sketch) {
@@ -198,9 +196,6 @@ class SketchController extends Controller
 
     /**
      * Hapus sketsa.
-     *
-     * @param  int  $id
-     * @return \Illuminate\Http\JsonResponse
      */
     public function destroy($id)
     {
@@ -224,9 +219,6 @@ class SketchController extends Controller
 
     /**
      * Tampilkan semua sketsa yang dipublikasikan (untuk daftar publik).
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
      */
     public function indexPublic(Request $request)
     {
@@ -240,12 +232,10 @@ class SketchController extends Controller
     /**
      * Tampilkan satu sketsa publik berdasarkan slug.
      * Views akan ditambah di sini.
-     *
-     * @param  string  $slug
-     * @return \Illuminate\Http\JsonResponse
      */
     public function showPublicBySlug($slug)
     {
+        // --- PENTING: Metode ini TETAP memfilter berdasarkan 'Published' dan menambah views ---
         $sketch = Sketch::where('slug', $slug)
                         ->where('status', 'Published')
                         ->first();
@@ -262,7 +252,7 @@ class SketchController extends Controller
             $sketch->increment('views');
             Log::info('DEBUG LARAVEL: Views incremented for sketch slug: ' . $slug . '. New views: ' . ($sketch->views));
             return response()->json($sketch);
-        } catch (\Exception $e) { // Tangani ValidationException juga jika ada
+        } catch (\Exception $e) {
             Log::error('Error incrementing views for sketch slug ' . $slug . ': ' . $e->getMessage());
             return response()->json(['message' => 'Error processing sketch: ' . $e->getMessage()], 500);
         }
