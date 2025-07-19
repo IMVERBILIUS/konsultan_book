@@ -40,8 +40,6 @@ class ArticleController extends Controller
         \Log::info('DEBUG LARAVEL CONTROLLER [STORE]: Request all(): ' . json_encode($request->all()));
         \Log::info('DEBUG LARAVEL CONTROLLER [STORE]: Request hasFile("article_thumbnail_file"): ' . ($request->hasFile('article_thumbnail_file') ? 'TRUE' : 'FALSE'));
         if ($request->hasFile('article_thumbnail_file')) {
-            // --- PERBAIKAN DI SINI: Hapus .toArray() dari log UploadedFile ---
-            // Kita bisa mengakses properti langsung atau menggunakan __toString() atau getClientOriginalName()
             $file = $request->file('article_thumbnail_file');
             \Log::info('DEBUG LARAVEL CONTROLLER [STORE]: File details (hasFile is TRUE): OriginalName=' . $file->getClientOriginalName() . ', MimeType=' . $file->getMimeType() . ', Size=' . $file->getSize());
         } else {
@@ -161,7 +159,6 @@ class ArticleController extends Controller
         \Log::info('DEBUG LARAVEL CONTROLLER [UPDATE]: Request all(): ' . json_encode($request->all()));
         \Log::info('DEBUG LARAVEL CONTROLLER [UPDATE]: Request hasFile("article_thumbnail_file"): ' . ($request->hasFile('article_thumbnail_file') ? 'TRUE' : 'FALSE'));
         if ($request->hasFile('article_thumbnail_file')) {
-            // --- PERBAIKAN DI SINI: Hapus .toArray() dari log UploadedFile ---
             $file = $request->file('article_thumbnail_file');
             \Log::info('DEBUG LARAVEL CONTROLLER [UPDATE]: File details (hasFile is TRUE): OriginalName=' . $file->getClientOriginalName() . ', MimeType=' . $file->getMimeType() . ', Size=' . $file->getSize());
         } else {
@@ -319,24 +316,24 @@ class ArticleController extends Controller
     {
         $article = Article::with('subheadings.paragraphs')
                         ->where('slug', $slug)
-                        ->where('status', 'Published')
+                        ->where('status', 'Published') // <--- PENTING: Hanya ambil yang Published
                         ->first();
 
         if (!$article) {
             $checkDraft = Article::where('slug', $slug)->first();
             if($checkDraft){
-                return response()->json(['message' => 'Article is not published yet.'], 403);
+                return response()->json(['message' => 'Article is not published yet.'], 403); // <--- PENTING: Jika Draft, kembalikan 403
             }
             return response()->json(['message' => 'Article not found.'], 404);
         }
 
         try {
-            $article->increment('views');
+            $article->increment('views'); // <--- PENTING: Increment views hanya jika artikel Published
             \Log::info('DEBUG LARAVEL: Views incremented for slug: ' . $slug . '. New views: ' . ($article->views));
 
             return response()->json($article);
 
-        } catch (\Exception | ValidationException $e) { // Tangani ValidationException juga
+        } catch (\Exception | ValidationException $e) {
             \Log::error('Error incrementing views for slug ' . $slug . ': ' . $e->getMessage());
             $statusCode = ($e instanceof ValidationException) ? 422 : 500;
             return response()->json(['message' => 'Error processing article: ' . $e->getMessage()], $statusCode);
