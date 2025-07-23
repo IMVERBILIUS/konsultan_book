@@ -145,6 +145,8 @@ class ConsultationServiceController extends Controller
         if ($request->hasFile('service_thumbnail_file')) {
             $file = $request->file('service_thumbnail_file');
             Log::info('DEBUG LARAVEL CONTROLLER [SERVICE UPDATE]: File details (hasFile is TRUE): OriginalName=' . $file->getClientOriginalName() . ', MimeType=' . $file->getMimeType() . ', Size=' . $file->getSize());
+        } else {
+            Log::info('DEBUG LARAVEL CONTROLLER [SERVICE UPDATE]: Request hasFile is FALSE for service_thumbnail_file. File might not have reached PHP or name mismatch.');
         }
         // --- AKHIR DEBUGGING ---
 
@@ -159,7 +161,7 @@ class ConsultationServiceController extends Controller
                 'price' => 'sometimes|required|numeric|min:0',
                 'short_description' => 'sometimes|required|string|max:255',
                 'product_description' => 'sometimes|required|string',
-                'service_thumbnail_file' => 'nullable|image|mimes:jpg,jpeg,png,gif|max:5120', // Max 5MB
+                'service_thumbnail_file' => 'nullable|image|mimes:jpg,jpeg,png,gif|max:5120',
             ]);
         } catch (ValidationException $e) {
             Log::error('Validation Error (ConsultationService update): ' . json_encode($e->errors()));
@@ -221,7 +223,7 @@ class ConsultationServiceController extends Controller
             }
             $service->delete();
             return response()->json(['message' => 'Layanan berhasil dihapus.']);
-        } catch (\Exception $e) {
+        } catch (\Exception | ValidationException $e) {
             \Log::error('Error deleting consultation service: ' . $e->getMessage() . ' Trace: ' . $e->getTraceAsString());
             return response()->json(['message' => 'Gagal menghapus layanan: ' . $e->getMessage()], 500);
         }

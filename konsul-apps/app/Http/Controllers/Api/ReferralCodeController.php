@@ -13,6 +13,9 @@ class ReferralCodeController extends Controller
 {
     /**
      * Tampilkan semua kode referral (untuk daftar admin).
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function index(Request $request)
     {
@@ -27,6 +30,9 @@ class ReferralCodeController extends Controller
 
     /**
      * Simpan kode referral baru.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function store(Request $request)
     {
@@ -67,34 +73,25 @@ class ReferralCodeController extends Controller
 
     /**
      * Tampilkan satu kode referral.
-     * Ini dipanggil oleh ReferralEditPage.
      *
      * @param  int  $id
      * @return \Illuminate\Http\JsonResponse
      */
     public function show($id)
     {
-        // --- DEBUGGING: Log pengambilan kode referral admin ---
-        Log::info('DEBUG LARAVEL CONTROLLER [REFERRAL SHOW ADMIN]: Incoming request for show with ID: ' . $id);
-        if (!is_numeric($id) || $id <= 0) {
-            Log::warning('DEBUG LARAVEL CONTROLLER [REFERRAL SHOW ADMIN]: Invalid ID received: ' . $id);
-            return response()->json(['message' => 'ID kode referral tidak valid.'], 400);
-        }
-        // --- AKHIR DEBUGGING ---
-
         $referralCode = ReferralCode::find($id);
-
         if (!$referralCode) {
-            Log::warning('DEBUG LARAVEL CONTROLLER [REFERRAL SHOW ADMIN]: Referral Code ID ' . $id . ' not found in database.');
             return response()->json(['message' => 'Kode referral tidak ditemukan.'], 404);
         }
-
-        Log::info('DEBUG LARAVEL CONTROLLER [REFERRAL SHOW ADMIN]: Referral Code ID ' . $id . ' found. Code: "' . $referralCode->code . '"');
         return response()->json($referralCode);
     }
 
     /**
      * Perbarui kode referral.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  int  $id
+     * @return \Illuminate\Http\JsonResponse
      */
     public function update(Request $request, $id)
     {
@@ -139,6 +136,9 @@ class ReferralCodeController extends Controller
 
     /**
      * Hapus kode referral.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\JsonResponse
      */
     public function destroy($id)
     {
@@ -154,5 +154,43 @@ class ReferralCodeController extends Controller
             Log::error('Error deleting referral code: ' . $e->getMessage() . ' Trace: ' . $e->getTraceAsString());
             return response()->json(['message' => 'Gagal menghapus kode referral: ' . $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Cek validitas kode referral.
+     * Digunakan oleh frontend untuk verifikasi.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function check(Request $request)
+    {
+        $request->validate(['code' => 'required|string|max:255']);
+        $code = $request->input('code');
+
+        $referralCode = ReferralCode::where('code', $code)
+                                    ->where(function($query) {
+                                        $query->whereNull('valid_from')
+                                              ->orWhere('valid_from', '<=', now());
+                                    })
+                                    ->where(function($query) {
+                                        $query->whereNull('valid_until')
+                                              ->orWhere('valid_until', '>=', now());
+                                    })
+                                    ->first();
+
+        if (!$referralCode) {
+            return response()->json(['message' => 'Kode referral tidak valid atau sudah kadaluarsa.'], 404);
+        }
+
+        // Cek jika batas penggunaan sudah tercapai
+        if ($referralCode->max_uses !== null && $referralCode->current_uses >= $referralCode->max_uses) {
+            return response()->json(['message' => 'Kode referral sudah habis digunakan.'], 403);
+        }
+
+        return response()->json([
+            'message' => 'Kode referral valid.',
+            'referral_code' => $referralCode // Mengembalikan objek kode referral
+        ]);
     }
 }

@@ -4,27 +4,20 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Models\ConsultationBooking; // Model Booking
-use App\Models\ConsultationService; // Model Layanan
-use App\Models\ReferralCode; // Model Kode Referral
-use App\Models\Invoice; // Model Invoice
-use Illuminate\Support\Facades\DB; // Untuk transaksi
-use Illuminate\Support\Str; // Untuk kode invoice random
+use App\Models\ConsultationBooking;
+use App\Models\ConsultationService;
+use App\Models\ReferralCode;
+use App\Models\Invoice;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
-use Carbon\Carbon; // Untuk manipulasi tanggal
-use Illuminate\Support\Facades\Log; // Untuk logging
+use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
 
 class ConsultationBookingController extends Controller
 {
-    // Alamat default untuk sesi offline
     const OFFLINE_ADDRESS_DEFAULT = "Jl. Sadar Dusun I Kampung Padang, Riau - 28557";
 
-    /**
-     * Tampilkan semua booking (untuk daftar admin).
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
-     */
     public function index(Request $request)
     {
         try {
@@ -38,12 +31,6 @@ class ConsultationBookingController extends Controller
         }
     }
 
-    /**
-     * Simpan booking baru dan buat invoice.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
-     */
     public function store(Request $request)
     {
         try {
@@ -53,8 +40,8 @@ class ConsultationBookingController extends Controller
                 'booked_time' => 'required|date_format:H:i',
                 'contact_preference' => 'required|in:chat_only,chat_and_call',
                 'session_type' => 'required|in:online,offline',
-                'offline_address' => 'nullable|string|required_if:session_type,offline', // Wajib jika offline
-                'referral_code' => 'nullable|string|exists:referral_codes,code', // Kode referral yang dimasukkan user
+                'offline_address' => 'nullable|string|required_if:session_type,offline',
+                'referral_code' => 'nullable|string|exists:referral_codes,code',
                 'payment_type' => 'required|in:dp,full_payment',
             ]);
         } catch (ValidationException $e) {
@@ -74,7 +61,6 @@ class ConsultationBookingController extends Controller
             $discountAmount = 0;
             $referralCodeId = null;
 
-            // Proses Kode Referral
             if ($request->referral_code) {
                 $referralCode = ReferralCode::where('code', $request->referral_code)
                                             ->where(function($query) {
@@ -88,13 +74,12 @@ class ConsultationBookingController extends Controller
                                             ->first();
 
                 if ($referralCode && ($referralCode->max_uses === null || $referralCode->current_uses < $referralCode->max_uses)) {
-                    $discountAmount = $totalPrice * ($referralCode->discount_percentage / 100);
+                    $discountPercentage = $referralCode->discount_percentage; // Simpan persentase
+                    $discountAmount = $totalPrice * ($discountPercentage / 100);
                     $referralCodeId = $referralCode->id;
-                    $referralCode->increment('current_uses'); // Tambah penggunaan kode referral
+                    $referralCode->increment('current_uses');
                     Log::info('DEBUG LARAVEL: Referral code ' . $referralCode->code . ' applied. Discount: ' . $discountAmount);
                 } else {
-                    // Jika kode tidak valid atau sudah habis, Anda bisa lempar error atau abaikan
-                    // Untuk saat ini, kita abaikan saja diskonnya dan lanjut tanpa referral
                     Log::warning('DEBUG LARAVEL: Invalid or expired referral code: ' . $request->referral_code);
                 }
             }
@@ -102,20 +87,18 @@ class ConsultationBookingController extends Controller
             $finalPrice = $totalPrice - $discountAmount;
             $amountToPay = $request->payment_type === 'dp' ? $finalPrice / 2 : $finalPrice;
 
-            // Buat Invoice
             $invoice = new Invoice();
             $invoice->user_id = $request->user()->id;
             $invoice->invoice_no = 'INV-' . Str::upper(Str::random(8)) . '-' . now()->format('Ymd');
             $invoice->invoice_date = now();
-            $invoice->due_date = now()->addDay(); // Jatuh tempo 1 hari setelah invoice dibuat
+            $invoice->due_date = now()->addDay();
             $invoice->total_amount = $amountToPay; // Total yang harus dibayar sekarang
             $invoice->payment_type = $request->payment_type;
-            $invoice->payment_status = 'unpaid'; // Status awal
+            $invoice->payment_status = 'unpaid';
             $invoice->session_type = $request->session_type;
             $invoice->save();
             Log::info('DEBUG LARAVEL: Invoice created: ' . $invoice->invoice_no . ' for amount: ' . $invoice->total_amount);
 
-            // Buat Booking
             $booking = ConsultationBooking::create([
                 'user_id' => $request->user()->id,
                 'service_id' => $request->service_id,
@@ -153,26 +136,61 @@ class ConsultationBookingController extends Controller
     }
 
     /**
-     * Tampilkan detail invoice untuk booking tertentu.
-     * (Menggantikan show booking detail)
+     * Tampilkan satu booking (INI BUKAN showInvoice lagi, ini show standar apiResource).
      *
      * @param  int  $id (Booking ID)
      * @return \Illuminate\Http\JsonResponse
      */
     public function show($id)
     {
+        \Log::info('DEBUG LARAVEL CONTROLLER [BOOKING SHOW ADMIN]: Incoming request for show with ID: ' . $id);
+        if (!is_numeric($id) || $id <= 0) {
+            \Log::warning('DEBUG LARAVEL CONTROLLER [BOOKING SHOW ADMIN]: Invalid ID received: ' . $id);
+            return response()->json(['message' => 'ID booking tidak valid.'], 400);
+        }
+
         $booking = ConsultationBooking::with(['user', 'service', 'referralCode', 'invoice'])->find($id);
         if (!$booking) {
+            \Log::warning('DEBUG LARAVEL CONTROLLER [BOOKING SHOW ADMIN]: Booking ID ' . $id . ' not found for admin view.');
             return response()->json(['message' => 'Booking tidak ditemukan.'], 404);
         }
 
-        // Tampilkan detail invoice, bukan booking secara langsung
+        \Log::info('DEBUG LARAVEL CONTROLLER [BOOKING SHOW ADMIN]: Booking ID ' . $id . ' found.');
+        return response()->json(['message' => 'Booking berhasil ditemukan.', 'booking' => $booking]);
+    }
+
+    /**
+     * Tampilkan detail invoice untuk booking tertentu (metode kustom).
+     * Dipanggil oleh rute admin/consultation-bookings/{bookingId}/invoice.
+     *
+     * @param  int  $bookingId
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function showInvoice($bookingId)
+    {
+        // --- DEBUGGING: Log showInvoice ---
+        \Log::info('DEBUG LARAVEL CONTROLLER [BOOKING SHOW INVOICE]: Incoming request for showInvoice with Booking ID: ' . $bookingId);
+        if (!is_numeric($bookingId) || $bookingId <= 0) {
+            \Log::warning('DEBUG LARAVEL CONTROLLER [BOOKING SHOW INVOICE]: Invalid Booking ID received: ' . $bookingId);
+            return response()->json(['message' => 'ID booking tidak valid.'], 400);
+        }
+        // --- AKHIR DEBUGGING ---
+
+        $booking = ConsultationBooking::with(['invoice.user', 'service', 'user', 'referralCode'])->find($bookingId);
+        if (!$booking) {
+            \Log::warning('DEBUG LARAVEL CONTROLLER [BOOKING SHOW INVOICE]: Booking ID ' . $bookingId . ' not found for invoice view.');
+            return response()->json(['message' => 'Booking tidak ditemukan untuk invoice ini.'], 404);
+        }
+
         if (!$booking->invoice) {
+            \Log::warning('DEBUG LARAVEL CONTROLLER [BOOKING SHOW INVOICE]: Invoice not found for Booking ID: ' . $bookingId);
             return response()->json(['message' => 'Invoice tidak ditemukan untuk booking ini.'], 404);
         }
 
-        return response()->json(['message' => 'Invoice berhasil ditemukan.', 'invoice' => $booking->invoice->load(['user'])]);
+        \Log::info('DEBUG LARAVEL CONTROLLER [BOOKING SHOW INVOICE]: Invoice found for Booking ID ' . $bookingId . '. Invoice No: ' . $booking->invoice->invoice_no);
+        return response()->json(['message' => 'Invoice berhasil ditemukan.', 'invoice' => $booking->invoice->load('user')]); // Load user dari invoice
     }
+
 
     /**
      * Perbarui booking.
@@ -208,7 +226,6 @@ class ConsultationBookingController extends Controller
         try {
             DB::beginTransaction();
 
-            // Update details on booking
             $booking->service_id = $request->service_id ?? $booking->service_id;
             $booking->booked_date = $request->booked_date ?? $booking->booked_date;
             $booking->booked_time = $request->booked_time ?? $booking->booked_time;
@@ -218,8 +235,7 @@ class ConsultationBookingController extends Controller
             $booking->payment_type = $request->payment_type ?? $booking->payment_type;
             $booking->session_status = $request->session_status ?? $booking->session_status;
 
-            // Recalculate prices if service_id or referral_code changes
-            if ($request->service_id || $request->referral_code) {
+            if ($request->service_id || $request->referral_code) { // Recalculate prices if relevant fields change
                 $service = ConsultationService::find($booking->service_id);
                 if (!$service) {
                     throw new \Exception('Layanan konsultasi tidak ditemukan saat update.');
@@ -229,19 +245,16 @@ class ConsultationBookingController extends Controller
                 $referralCodeId = null;
 
                 if ($request->referral_code) {
-                    $referralCode = ReferralCode::where('code', $request->referral_code)->first(); // Simplified check for update
+                    $referralCode = ReferralCode::where('code', $request->referral_code)->first();
                     if ($referralCode) {
                         $discountAmount = $totalPrice * ($referralCode->discount_percentage / 100);
                         $referralCodeId = $referralCode->id;
-                        // Avoid incrementing uses on update unless the code changes AND payment status allows
-                        // For simplicity, we just assign the referralCodeId
                     }
                 }
                 $booking->discount_amount = $discountAmount;
                 $booking->referral_code_id = $referralCodeId;
                 $booking->final_price = $totalPrice - $discountAmount;
 
-                // Update invoice total if relevant
                 if ($booking->invoice) {
                     $amountToPay = $booking->payment_type === 'dp' ? $booking->final_price / 2 : $booking->final_price;
                     $booking->invoice->total_amount = $amountToPay;
@@ -271,7 +284,6 @@ class ConsultationBookingController extends Controller
 
     /**
      * Hapus booking.
-     * Juga hapus invoice terkait jika ada.
      *
      * @param  int  $id
      * @return \Illuminate\Http\JsonResponse
@@ -287,9 +299,9 @@ class ConsultationBookingController extends Controller
             DB::beginTransaction();
 
             if ($booking->invoice) {
-                $booking->invoice->delete(); // Hapus invoice terlebih dahulu
+                $booking->invoice->delete();
             }
-            $booking->delete(); // Hapus booking
+            $booking->delete();
 
             DB::commit();
 
