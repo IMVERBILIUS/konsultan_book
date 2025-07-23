@@ -9,21 +9,14 @@ class ConsultationService extends Model
 {
     use HasFactory;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
-     */
     protected $fillable = [
         'title',
         'price',
         'short_description',
         'product_description',
+        'thumbnail',
     ];
 
-    /**
-     * Get the consultation bookings for the service.
-     */
     public function consultationBookings()
     {
         return $this->hasMany(ConsultationBooking::class, 'service_id');
