@@ -17,8 +17,16 @@ class ConsultationService extends Model
         'thumbnail',
     ];
 
+    protected $casts = [
+        'price' => 'decimal:2', // Pastikan harga di-cast ke decimal
+    ];
+
+    // --- PERBAIKAN: Relasi many-to-many ke ConsultationBooking ---
     public function consultationBookings()
     {
-        return $this->hasMany(ConsultationBooking::class, 'service_id');
+        return $this->belongsToMany(ConsultationBooking::class, 'booking_service', 'service_id', 'booking_id')
+                    ->withPivot('price_at_booking')
+                    ->withTimestamps();
     }
+    // --- AKHIR PERBAIKAN ---
 }
